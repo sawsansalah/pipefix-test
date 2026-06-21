@@ -1,0 +1,205 @@
+# Pipefix signature library
+# Each entry: pattern (regex), stage, language, failure_type, hint
+# This is a fast heuristic layer. Anything not matched here still gets
+# sent to Claude for analysis, so the library doesn't need to be exhaustive.
+
+signatures:
+
+  # ---------------- INSTALL / DEPENDENCY ----------------
+  - pattern: "ModuleNotFoundError|No module named"
+    stage: install
+    language: python
+    failure_type: dependency
+    hint: "Missing Python package — likely not installed or not in requirements.txt"
+
+  - pattern: "Could not find a version that satisfies the requirement"
+    stage: install
+    language: python
+    failure_type: dependency
+    hint: "Version conflict or package name typo in requirements.txt"
+
+  - pattern: "Cannot find module|MODULE_NOT_FOUND"
+    stage: install
+    language: node
+    failure_type: dependency
+    hint: "Missing npm package — check package.json and node_modules"
+
+  - pattern: "npm ERR! peer dep|ERESOLVE"
+    stage: install
+    language: node
+    failure_type: dependency
+    hint: "npm dependency tree conflict, often peer dependency mismatch"
+
+  - pattern: "go: .* no required module provides package"
+    stage: install
+    language: go
+    failure_type: dependency
+    hint: "Missing entry in go.mod, run 'go mod tidy'"
+
+  - pattern: "Could not resolve dependencies|Could not find artifact"
+    stage: install
+    language: java
+    failure_type: dependency
+    hint: "Maven/Gradle could not resolve an artifact — check repo/version"
+
+  - pattern: "error: failed to select a version for|cannot find crate"
+    stage: install
+    language: rust
+    failure_type: dependency
+    hint: "Cargo dependency resolution failure, check Cargo.toml versions"
+
+  # ---------------- BUILD / COMPILE ----------------
+  - pattern: "SyntaxError: |IndentationError:"
+    stage: build
+    language: python
+    failure_type: build
+    hint: "Python syntax error — file fails to parse"
+
+  - pattern: "error TS\\d+:"
+    stage: build
+    language: node
+    failure_type: build
+    hint: "TypeScript compiler error"
+
+  - pattern: "Module build failed|webpack.*error"
+    stage: build
+    language: node
+    failure_type: build
+    hint: "Bundler/build pipeline failure"
+
+  - pattern: "# command-line-arguments|undefined: \\w+|cannot use .* as .* value"
+    stage: build
+    language: go
+    failure_type: build
+    hint: "Go compile error — type mismatch or undefined identifier"
+
+  - pattern: "error\\[E\\d+\\]"
+    stage: build
+    language: rust
+    failure_type: build
+    hint: "Rust compiler error, see error code for details"
+
+  - pattern: "BUILD FAILURE|cannot find symbol|package .* does not exist"
+    stage: build
+    language: java
+    failure_type: build
+    hint: "Java compilation failure via Maven/Gradle"
+
+  # ---------------- LINT / STATIC ANALYSIS ----------------
+  - pattern: "^\\S+\\.py:\\d+:\\d+: [EWF]\\d+"
+    stage: lint
+    language: python
+    failure_type: lint
+    hint: "flake8/ruff style or error violation"
+
+  - pattern: "\\d+ problems? \\(\\d+ errors?, \\d+ warnings?\\)"
+    stage: lint
+    language: node
+    failure_type: lint
+    hint: "ESLint reported errors/warnings"
+
+  - pattern: "golangci-lint|\\.go:\\d+:\\d+: "
+    stage: lint
+    language: go
+    failure_type: lint
+    hint: "Go static analysis issue (golangci-lint/vet)"
+
+  - pattern: "warning: unused variable|clippy::"
+    stage: lint
+    language: rust
+    failure_type: lint
+    hint: "Clippy lint warning/error"
+
+  - pattern: "Checkstyle violation|PMD violation"
+    stage: lint
+    language: java
+    failure_type: lint
+    hint: "Java static analysis violation"
+
+  # ---------------- TEST ----------------
+  - pattern: "FAILED |AssertionError|pytest"
+    stage: test
+    language: python
+    failure_type: test
+    hint: "pytest test failure or assertion error"
+
+  - pattern: "Tests:\\s+\\d+ failed|FAIL\\s+\\S+\\.test\\."
+    stage: test
+    language: node
+    failure_type: test
+    hint: "Jest/Vitest test failure"
+
+  - pattern: "--- FAIL:|FAIL\\s+\\S+\\s+\\[build failed\\]"
+    stage: test
+    language: go
+    failure_type: test
+    hint: "Go test failure"
+
+  - pattern: "test result: FAILED|panicked at"
+    stage: test
+    language: rust
+    failure_type: test
+    hint: "Rust test panic or failure"
+
+  - pattern: "Tests run: \\d+, Failures: [1-9]|AssertionFailedError"
+    stage: test
+    language: java
+    failure_type: test
+    hint: "JUnit test failure"
+
+  # ---------------- SECURITY ----------------
+  - pattern: "found \\d+ vulnerabilit(y|ies)"
+    stage: security
+    language: node
+    failure_type: security
+    hint: "npm audit found vulnerable dependencies"
+
+  - pattern: "vulnerability found in|Severity: (HIGH|CRITICAL)"
+    stage: security
+    language: python
+    failure_type: security
+    hint: "pip-audit/bandit found a vulnerability"
+
+  - pattern: "Trivy|CVE-\\d{4}-\\d+"
+    stage: security
+    language: generic
+    failure_type: security
+    hint: "Container/dependency scan found a CVE"
+
+  # ---------------- DOCKER ----------------
+  - pattern: "COPY failed|failed to compute cache key"
+    stage: docker
+    language: generic
+    failure_type: docker
+    hint: "Dockerfile COPY/ADD path issue or missing file in build context"
+
+  - pattern: "executor failed running .*: exit code"
+    stage: docker
+    language: generic
+    failure_type: docker
+    hint: "A RUN step in the Dockerfile exited non-zero"
+
+  - pattern: "pull access denied|manifest unknown"
+    stage: docker
+    language: generic
+    failure_type: docker
+    hint: "Base image not found or registry auth issue"
+
+  # ---------------- DEPLOY ----------------
+  - pattern: "Error: configmaps|forbidden: User .* cannot"
+    stage: deploy
+    language: generic
+    failure_type: deploy
+    hint: "Kubernetes RBAC/permission error during deploy"
+
+  - pattern: "Error: .* Plan: \\d+ to add"
+    stage: deploy
+    language: generic
+    failure_type: deploy
+    hint: "Terraform apply/plan error"
+
+  - pattern: "UPGRADE FAILED|release: not found"
+    stage: deploy
+    language: generic
+    failure_type: deploy
+    hint: "Helm release deployment failure"
