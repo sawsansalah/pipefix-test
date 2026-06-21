@@ -1,0 +1,120 @@
+name: CI with Pipefix
+
+on:
+  pull_request:
+    branches: [main]
+
+# No permissions at workflow level by default; each job opts in to only
+# what it actually needs (principle of least privilege).
+permissions: {}
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    # This job only builds/tests — it never touches secrets or posts anything,
+    # so it gets read-only access and nothing else.
+    permissions:
+      contents: read
+
+    steps:
+      # Pinned to a commit SHA (not the mutable "v4" tag) so this can't silently
+      # change underneath you if the tag were ever moved or compromised upstream.
+      # Verified via: curl https://api.github.com/repos/actions/checkout/git/refs/tags/v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+        with:
+          persist-credentials: false # don't leave a token-bearing git config on disk
+
+      # Verified via: curl https://api.github.com/repos/actions/setup-python/git/refs/tags/v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Pipefix deps
+        run: pip install -r requirements.txt --break-system-packages || pip install -r requirements.txt
+
+      - name: Make logs dir
+        run: mkdir -p logs
+
+      # ---------------- Sample app stages (replace with your real steps) ----------------
+      - name: Install (python-app)
+        working-directory: sample-apps/python-app
+        run: pip install -r requirements.txt 2>&1 | tee ../../logs/install.log
+        continue-on-error: true
+
+      - name: Lint (python-app)
+        working-directory: sample-apps/python-app
+        run: pip install flake8 --quiet && flake8 . 2>&1 | tee ../../logs/lint.log
+        continue-on-error: true
+
+      - name: Test (python-app)
+        working-directory: sample-apps/python-app
+        run: pytest 2>&1 | tee ../../logs/test.log
+        continue-on-error: true
+
+      # Hand off only the logs to the next job — not the checked-out source,
+      # not any credentials. Keeps the analysis job's attack surface minimal.
+      # NOTE: pin this to a commit SHA too before production use (rate-limited
+      # when this file was generated, so it's left at the major tag here).
+      - name: Upload logs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs
+          path: logs/
+          retention-days: 1
+
+  pipefix:
+    needs: ci
+    if: always()
+    runs-on: ubuntu-latest
+    # The ONLY job that touches the API key and the ONLY job with write access —
+    # and even then, scoped to pull-requests only. It cannot push code, manage
+    # issues, change repo settings, etc.
+    permissions:
+      pull-requests: write
+      contents: read
+    # Recommended: gate this behind a GitHub Environment with required reviewers
+    # for first-time contributors (Settings -> Environments -> "pipefix"), so a
+    # malicious PR can't silently trigger a run that burns your API key.
+    environment: pipefix
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Pipefix deps
+        run: pip install -r requirements.txt --break-system-packages || pip install -r requirements.txt
+
+      - name: Download logs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-logs
+          path: logs/
+
+      # Persists .pipefix_cache across runs so repeated failures (flaky tests,
+      # a recurring lint error) skip the Claude call entirely. Without this,
+      # the cache is rebuilt from empty on every run since GitHub-hosted
+      # runners are ephemeral.
+      - name: Restore Pipefix cache
+        uses: actions/cache@v4
+        with:
+          path: .pipefix_cache
+          key: pipefix-cache-${{ github.repository }}
+
+      - name: Run Pipefix
+        env:
+          # Scoped only to this step. The ci job above never sees this secret.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m pipefix.main analyze \
+            --logs-dir ./logs \
+            --repo-root ./sample-apps/python-app \
+            --platform github \
+            --post \
+            --cost-estimate
